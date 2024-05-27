@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 class predict_base():
     def __init__(self,sim_data):
+        self.orientation = 0
         return 
 
     def check_stability(self,sim_data):
@@ -148,6 +149,7 @@ class predict_adv_diff_diffrot(predict_base):
         dt          : time step
         """
         phi = np.random.standard_normal(1)[0] * math.sqrt(2*self.DrotReal*dt)
+        #phi = 2*np.pi/40*dt
         self.orientation -= phi
         d_Drot =  np.array([[math.cos(phi),-math.sin(phi)],
                             [math.sin(phi),math.cos(phi)]])
@@ -217,6 +219,189 @@ class predict_adv_diff_diffrot(predict_base):
         _cpredict.predict_all(L,res,self.space_discretization_step,dx[0]*self.dt_rot,dx[1]*self.dt_rot,self.D,self.Drot,self.center,self.center,self.dt_rot) 
         return res 
 
+
+class predict_adv_diff_diffrot_Adrift(predict_adv_diff_diffrot):
+    def __init__(self,sim_data,vdrift=0,orientation=0,skipL=False):
+        '''
+        Here the added drift from the agent is impemented.
+        Calulate advection rotatinal diffusion, translational diffusion not yet
+        warning does not work with adaptive time step
+        sim_data     : simdata class instance
+        orientation  : initial orientation [rad]
+        skipL        : so not update the likelihood
+        '''
+        super().__init__(sim_data,orientation=orientation,skipL=skipL)
+        self.vdrift=vdrift
+
+    def update_source(self,source,dx,dt):
+        """
+        Translational diffusion of agent > translational diffusion of source in egocentric map
+        Rotatinal diffusion of agent > rotate source
+        source      : position of source
+        dx          : displacement vector of agent
+        dt          : time step
+        """
+        phi = np.random.standard_normal(1)[0] * math.sqrt(2*self.DrotReal*dt)
+        self.orientation -= phi
+        d_Drot =  np.array([[math.cos(phi),-math.sin(phi)],
+                            [math.sin(phi),math.cos(phi)]])
+ 
+        return d_Drot@source - dx*dt - np.array([math.cos(self.orientation),-math.sin(self.orientation)])*self.vdrift*dt
+class predict_diffrot(predict_base):
+    def __init__(self,sim_data,orientation=0,skipL=False):
+        '''
+        warning does not work with adaptive time step
+        orientation  : initial orientation [rad]
+        '''
+        super().__init__(sim_data)
+        self.space_discretization_step = sim_data.space_discretization_step
+        self.D = sim_data.D
+        self.Drot = sim_data.Drot
+        self.DrotReal = sim_data.DrotReal
+        self.center = sim_data.center
+        self.orientation = orientation
+
+        self.repeat = 1
+        self.check_stability(sim_data)
+        if self.repeat>1:
+            logger.info(f'repeat  {self.repeat} ')
+        self.dt_rot = sim_data.dt/self.repeat
+        if self.repeat == 1:
+            self.update_likelyhood = self.update_likelyhood1
+        elif self.repeat == 2:
+            self.update_likelyhood = self.update_likelyhood2
+        elif self.repeat == 3:
+            self.update_likelyhood = self.update_likelyhood3
+        elif self.repeat == 4:
+            self.update_likelyhood = self.update_likelyhood4
+        else:
+            if self.repeat%2:
+                self.update_likelyhood = self.update_likelyhoodn_odd
+            else:
+                self.update_likelyhood = self.update_likelyhoodn_even
+
+        if skipL:
+            self.update_likelyhood = super().update_likelyhood
+            logger.warning(f'skip calulaton of likelyhood ')
+        return 
+
+    def check_stability(self,sim_data):
+        """
+        Check if all stavility criteria are furfilled.
+        """
+        # NOTE: N << l*np.sqrt(8/(D*dt)) [Courant criterion: for numerical stability of Euler scheme for diffusion]
+        Dmax = sim_data.Drot*(sim_data.center*sim_data.center)
+        
+        while True:
+            DS = False
+            AS = False
+            D_stability = (4*Dmax*sim_data.dt/self.repeat) / sim_data.space_discretization_step**2
+            if D_stability  > 0.4:
+                #logger.warning(f'Stability for diffuision is only {D_stability} ')
+                pass
+            elif D_stability > 1:
+                #logger.critical(f'unstable for diffuision: {D_stability} ')
+                #raise ValueError('unstable for diffuision')
+                pass
+            else:
+                DS = True
+            # NOTE: N << 4*l/(speed*dt)  [Stability criterion for convection]
+            speed = max(sim_data.Drot*(sim_data.center),sim_data.speed)
+            C_stability = speed*sim_data.dt/self.repeat / sim_data.space_discretization_step
+            if C_stability > 0.1:
+                pass
+                #logger.warning(f'Stability for convection is only {C_stability} ')
+            elif C_stability > 1:
+                pass
+                #logger.critical(f'unstable for convection: {C_stability} ')
+                #raise ValueError('unstable for convection')
+            else:
+                AS = True
+            if AS and DS:
+                break
+            self.repeat += 1
+        return D_stability,C_stability
+    def log(self,update_step):
+        return self.orientation
+
+    def update_source(self,source,dx,dt):
+        """
+        Translational diffusion of agent > translational diffusion of source in egocentric map
+        Rotatinal diffusion of agent > rotate source
+        dx          : displacement vector of agent
+        dt          : time step
+        """
+        phi = np.random.standard_normal(1)[0] * math.sqrt(2*self.DrotReal*dt)
+        self.orientation -= phi
+        d_Drot =  np.array([[math.cos(phi),-math.sin(phi)],
+                            [math.sin(phi),math.cos(phi)]])
+        
+        return d_Drot@source 
+
+    def update_likelyhood1(self,L,dx,dt):
+        """
+        Prediction step, accounting for convection (due to active motion of the agent) and diffusion (due to motility noise of the agent)
+        """
+        dx *= 0
+        res = np.zeros_like(L)
+        _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        return res
+
+    def update_likelyhood2(self,L,dx,dt):
+        """
+        Prediction step, accounting for convection (due to active motion of the agent) and diffusion (due to motility noise of the agent)
+        """
+        dx *= 0
+        res = np.zeros_like(L)      
+        _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        _cpredict.predict_rot(res,L,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        return L 
+
+    def update_likelyhood3(self,L,dx,dt):
+        """
+        Prediction step, accounting for convection (due to active motion of the agent) and diffusion (due to motility noise of the agent)
+        """
+        dx *= 0
+        res = np.zeros_like(L)
+        _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        _cpredict.predict_rot(res,L,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot)
+        _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        return res 
+
+    def update_likelyhood4(self,L,dx,dt):
+        """
+        Prediction step, accounting for convection (due to active motion of the agent) and diffusion (due to motility noise of the agent)
+        """
+        dx *= 0
+        res = np.zeros_like(L)
+        _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        _cpredict.predict_rot(res,L,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        _cpredict.predict_rot(res,L,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        return L 
+
+    def update_likelyhoodn_even(self,L,dx,dt):
+        """
+        Prediction step, accounting for convection (due to active motion of the agent) and diffusion (due to motility noise of the agent)
+        """
+        dx *= 0
+        res = np.zeros_like(L)
+        for i in range(int(self.repeat/2)):
+            _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+            _cpredict.predict_rot(res,L,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot)             
+        return L 
+
+    def update_likelyhoodn_odd(self,L,dx,dt):
+        """
+        Prediction step, accounting for convection (due to active motion of the agent) and diffusion (due to motility noise of the agent)
+        """
+        dx *= 0
+        res = np.zeros_like(L)
+        for i in range(int(self.repeat/2)):
+            _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+            _cpredict.predict_rot(res,L,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot)             
+        _cpredict.predict_rot(L,res,self.space_discretization_step,self.Drot,self.center,self.center,self.dt_rot) 
+        return res 
 
 
 

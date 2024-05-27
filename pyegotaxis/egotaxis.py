@@ -16,8 +16,13 @@ logger = logging.getLogger(__name__)
 # import user libraries
 from .functions import *
 from .simdata import *
-from . import functions3dDiff as functionsC
-def draw_events(sim_data, dt, source):
+from . import functionsExp 
+from . import functions3dDiff
+from . import functionsAsym
+from . import functionsDrift
+
+
+def draw_events(sim_data, dt, source, phi=0.):
     '''
     Draw random event for each  receptor
     sim_data    : class instance of  with all paramters and matrices
@@ -27,7 +32,16 @@ def draw_events(sim_data, dt, source):
     # vectorize loop
     '''
     this_rates = np.zeros(sim_data.directions.shape[0])
-    functionsC.fieldv(sim_data.lambdaReal_, source - sim_data.agent_sizeReal*sim_data.directions,this_rates,sim_data.space_discretization_step) 
+    if sim_data.field_real == '3Ddiff':
+        functions3dDiff.fieldv(sim_data.lambdaReal_, source - sim_data.agent_sizeReal*sim_data.directions,this_rates,sim_data.space_discretization_step) 
+    elif sim_data.field_real == 'Exp':
+        functionsExp.fieldv(sim_data.AReal, sim_data.kReal, source - sim_data.agent_sizeReal*sim_data.directions,this_rates,sim_data.space_discretization_step) 
+    elif sim_data.field_real == 'Asym':
+        functionsAsym.fieldv(sim_data.lambdaReal_, sim_data.gammaReal , source - sim_data.agent_sizeReal*sim_data.directions, phi ,this_rates,sim_data.space_discretization_step) 
+    elif sim_data.field_real == 'Drift':
+        functionsDrift.fieldv(sim_data.lambdaReal_, sim_data.vdrift, sim_data.D0, source - sim_data.agent_sizeReal*sim_data.directions, phi ,this_rates,sim_data.space_discretization_step) 
+    else:
+        raise NotImplementedError(sim_data.field_real)
     this_rates  /= sim_data.N_angles # Note: normalizaton by 'N_angles', thus ensuring that the total binding rate is indepedendent of 'N_angle'
     dm_possion =  np.random.poisson(this_rates*dt) # Poisson distributed vectorial events
     return dm_possion.sum(), (sim_data.directions.T * dm_possion).sum(axis=1)
@@ -148,7 +162,7 @@ def run_sim(sim_data,decision,predict,update_step,get_events=draw_events,plot=Fa
         L_predict = predict.update_likelyhood(L,dx,dt)
     
         #get the new input from the receptors
-        norm_dm,dm = get_events(sim_data, dt, source)       
+        norm_dm,dm = get_events(sim_data, dt, source, predict.orientation)       
         dm_tmp += dm # keep a record    
         norm_dm_tmp += norm_dm
         # update Likelihood bases on the events

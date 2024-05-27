@@ -59,6 +59,43 @@ int calc_Drot::predict(int nrows, int ncols, double* likelihood, int nrows_r, in
 }
 
 
+inline void calc_rot(int ind_y, int ind_y_p1, int ind_y_m1, int ind_x, int ind_xc, int ind_x_p1 , int ind_x_m1,
+             double* likelihood, double* res, double space_discretization_step, double Drot, double cx,double cy, double dt){
+        double Nl[] = {likelihood[ind_y + ind_x_p1], likelihood[ind_y + ind_x_m1],
+                       likelihood[ind_xc + ind_y_p1], likelihood[ind_xc + ind_y_m1],
+                       likelihood[ind_x_m1 + ind_y_m1], likelihood[ind_x_p1 + ind_y_p1],likelihood[ind_xc+ind_y] };
+        double grad_x = ( likelihood[ind_y + ind_x_p1] - likelihood[ind_y + ind_x_m1] ) / (2*space_discretization_step);
+        double grad_y = ( likelihood[ind_xc + ind_y_p1] - likelihood[ind_xc + ind_y_m1] ) / (2*space_discretization_step);
+        double H_xx =  ( likelihood[ind_y + ind_x_p1] + likelihood[ind_y + ind_x_m1] - 2*likelihood[ind_xc+ind_y]) / (space_discretization_step*space_discretization_step);
+        double H_yy =  ( likelihood[ind_xc + ind_y_p1] + likelihood[ind_xc + ind_y_m1] - 2*likelihood[ind_xc+ind_y]) / (space_discretization_step*space_discretization_step);
+        double H_xy = ( likelihood[ind_x_m1 + ind_y_m1] + likelihood[ind_x_p1 + ind_y_p1] + 2*likelihood[ind_xc+ind_y] - 
+                        likelihood[ind_x_m1 + ind_y] - likelihood[ind_x_p1 + ind_y] -likelihood[ind_xc + ind_y_m1] -likelihood[ind_xc + ind_y_p1]) 
+                        / (2*space_discretization_step*space_discretization_step);
+        double x = ind_x*space_discretization_step - cx;
+        double y = ind_y*space_discretization_step - cy;
+        double diff   = dt*Drot*( -x*grad_x - y*grad_y - 2*x*y*H_xy + x*x*H_yy + y*y*H_xx);
+        res[ind_xc+ind_y] = likelihood[ind_xc+ind_y] + diff;
+        return;
+}
+
+
+int predict_rot(int nrows, int ncols, double* likelihood,int nrows_r, int ncols_r, double* res,
+            double space_discretization_step, double Drot, double cx,double cy, double dt  )
+{
+    for (int ind_x=1;ind_x<nrows-1;ind_x++){
+        int ind_x_m1=ncols*(ind_x-1);
+        int ind_x_p1=ncols*(ind_x+1);
+        int ind_xc = ind_x*ncols;
+        for (int ind_y=1;ind_y<ncols-1;ind_y++){
+            int ind_y_m1=ind_y-1;
+            int ind_y_p1=ind_y+1;
+            calc_rot( ind_y, ind_y_p1, ind_y_m1, ind_x, ind_xc, ind_x_p1, ind_x_m1,
+                     likelihood, res, space_discretization_step, Drot, cx, cy, dt);
+        }
+    }
+
+    return 0;
+}
 
 inline void calc_adv(int ind_y, int ind_y_p1, int ind_y_m1, int ind_xc, int ind_x_p1 , int ind_x_m1,
              double* likelihood, double* res, double dx,double dy,double space_discretization_step, double dt){

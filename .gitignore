@@ -2,9 +2,11 @@
 .vscode/
 cpp/cpredict_wrap.cpp
 cpp/cpredict.py
-cpp/cfunctions_wrap.cpp
-cpp/cfunctions.py
 
+cpp/cfunctions_wrap.cpp
+cpp/cfunctionsExp_wrap.cpp
+cpp/cfunctions.py
+cpp/cfunctionsExp.py
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

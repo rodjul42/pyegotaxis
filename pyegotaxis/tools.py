@@ -126,8 +126,10 @@ def load_single(file,name = 'arr_0', parameter = None,skipTest=False,roundp=10,p
         for pname,value in parameter.items():
             if pname == "lam":
                 pname = "lambda_"
+            if pname == "gamma":
+                pname = "gammaReal"
             if np.round(sim_data.parameter[pname],roundp) !=  value:
-                raise ValueError(f'The parameter {pname} from the sim ({sim_data.parameter[pname]}) does not mathc the one ({value}) from the file name {path}')
+                raise ValueError(f'The parameter {pname} from the sim ({sim_data.parameter[pname]}) does not mathc the one ({value}) from the file name {file}')
     sim_data.parameter['filename'] = file
     return sim_data
 
@@ -161,7 +163,7 @@ def read_filename(file,typs):
     typs: paramters names to get from file name
     get paramters from filename 
     '''
-    return re.sub("_".join([typ+"([0-9.\+\-e]*|inf)" for typ in typs])+"_([0-9]*).npz","#,#".join(["\\"+str(i+1) for i in range(len(typs)+1)]), file).split('#,#')
+    return re.sub("_".join([typ+r"([0-9.+-e]*|inf)" for typ in typs])+"_([0-9]*).npz","#,#".join(["\\"+str(i+1) for i in range(len(typs)+1)]), file).split('#,#')
 
 
 def read_foldername(file,typs):
@@ -169,7 +171,7 @@ def read_foldername(file,typs):
     typs: paramters names to get from folder name
     get paramters from folder name 
     '''
-    return re.sub("_".join([typ+"([0-9.\+\-e]*|inf)" for typ in typs]),"#,#".join(["\\"+str(i+1) for i in range(len(typs))]), file).split('#,#')
+    return re.sub("_".join([typ+r"([0-9.+-e]*|inf)" for typ in typs]),"#,#".join(["\\"+str(i+1) for i in range(len(typs))]), file).split('#,#')
 
 
 def get_idxs(path_folder,typs,roundp=10):
@@ -233,17 +235,17 @@ def get_all_stats(path_folder,all_flies,skipTest=False,phi0=False,**args):
                 data += load_data(os.path.join(path_folder,file),parameter=idx_dict,skipTest=skipTest,phi0=phi0)
                 file_names.append( file )
             except Exception as inst:
-                print(file) 
+                print(inst,file) 
                 raise inst
         for file in row["folder"]:
             try:
                 data += load_data_folder(os.path.join(path_folder,file),parameter=idx_dict,skipTest=skipTest,phi0=phi0)
                 file_names.append( file )
             except Exception as inst:
-                print(file) 
+                print(inst,file) 
                 raise inst
         if len(data) == 0:
-            logger.warn(f"Sim empty {os.path.join(path_folder,file)}")
+            logger.warning(f"Sim empty {os.path.join(path_folder,file)}")
             continue 
         
         sl = []
@@ -421,6 +423,7 @@ def get_info_cumsum(data):
         stats = pd.Series([1 if sim.stats['reached'] else 0],index=['reached'])
         last = pd.concat([lastcum,stats])
         tmp.append(last)
+    
     tmp = pd.concat(tmp,keys=np.arange(len(data)),names=['sim'],axis=1).T
     return tmp.rename(columns={'Sphi_rot':'rot_csum','Sphi_adv':'adv_csum',
                       'Sphi_tc':'tc_csum','Sphi_sc':'sc_csum','Sphi_t':'full_csum'})
@@ -442,6 +445,9 @@ def add_info_stats(path_folder,all_flies,all_stats,saveDetails=None):
     index = []
     for idx,row in all_flies.iterrows():
         sims = load_data_folder(os.path.join(path_folder,row['folder'][0]))
+        if len(sims) == 0:
+            logger.warning(f"Sim empty {os.path.join(path_folder,row['folder'][0])}")
+            continue
         stats =  get_info_cumsum(sims)
         
         index.append(idx)
@@ -456,7 +462,7 @@ def add_info_stats(path_folder,all_flies,all_stats,saveDetails=None):
     allstats_groupedfound = (allstats[allstats['reached'] == 1]).groupby(idx_names).describe()
     summ = (allstats_grouped[('tc_csum','mean')] + allstats_grouped[('sc_csum','mean')])
     
-    for idx,row in all_flies.iterrows():
+    for idx,row in all_stats.iterrows():
         all_stats.loc[idx,'tc_csum'] = allstats_grouped.loc[idx,('tc_csum','mean')]
         all_stats.loc[idx,'sc_csum'] = allstats_grouped.loc[idx,('sc_csum','mean')]
         all_stats.loc[idx,'INFO_CUM']  = allstats_grouped.loc[idx,('tc_csum','mean')]/ \

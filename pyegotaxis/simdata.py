@@ -12,7 +12,9 @@ from scipy import stats
 logger = logging.getLogger(__name__)
 
 from .functions import *
-from . import functions3dDiff as functionsC
+from .functions3dDiff import distances_ij
+from . import functionsExp
+from . import functions3dDiff
 from . import tools
 from . import utils
 from .tools import SIMLOG,SIMLOG_tcsc
@@ -21,8 +23,8 @@ class simdata():
     A class for all the parameters and precomputed matrices
     """
     def __init__(self,seed=42,sampling_interval=100, sampling2_interval=100, dt=5e-3,maxTime=100,N=200,l=1,boundary='a',
-            D=0, Drot=0,lambda_=1, agent_size = 0.00025, speed = 0.01,lambdaReal_=None,agent_sizeReal=None,DrotReal=None,
-            target_size=None, source =  np.array([0,0.2])):
+            D=0, Drot=0,lambda_=1, agent_size = 0.00025, speed = 0.01,lambdaReal_=None,gammaReal=None,vdrift=None,D0=None,agent_sizeReal=None,DrotReal=None,
+            target_size=None, source =  np.array([0,0.2]), field="3Ddiff", fieldReal=None,**args):
         """
         seed        : seed
         sampling_interval  : for saving results
@@ -39,7 +41,9 @@ class simdata():
         agent_size  : [m] radius 'a' of agent (Note: should be in range 0.0005-0.001 for reliable results)
         speed       : [m/s] speed of agent
         target_size : [m] radius of target
-        source : [m] initial position of the source
+        source      : [m] initial position of the source
+        field       : [1/s] concentraion field 3Ddiff (~1/r) or Exp (~ e**r)
+        [Drot,lambda,agent_size,field]Real : paramters for the environment, if they should differ from the agent's assumption 
         """
 
         self.use_cfunc = True
@@ -96,27 +100,45 @@ class simdata():
         self.phi0 = np.nan
 
         self.bound = 0#1.5*max(self.space_discretization_step,self.agent_size) # [m] minimal distance up to which field is computed; for numerical stability
-        self.set_receptors()
-
-        self.calc_matrices()        
+     
 
         self.profile = False
         self.max_dist = max_dist
+        A, k = self.calc_parameterExp(lambdaReal_, self.target_size, self.max_dist)
+        self.AReal = A
+        self.kReal = k
+        A, k = self.calc_parameterExp(lambda_, self.target_size, self.max_dist)
+        self.A = A
+        self.k = k
+        self.fieldReal = fieldReal
+        if fieldReal == 'Asym':
+            if gammaReal is None:
+                raise ValueError('no value for gammaReal ')
+            self.gammaReal = gammaReal
+        elif fieldReal == 'Drift':
+            if D0 is None or vdrift  is None:
+                    raise ValueError('no value for D0 or  ')
+            self.D0 = D0 
+            self.vdrift = vdrift  
+
+        self.set_receptors()
+        self.field = field
+        if fieldReal is None:
+            fieldReal = field
+        self.field_real = fieldReal
+        self.calc_matrices()    
+
 
     @classmethod
     def from_simdata(cls, simlog):
-        para = ['seed', 'sampling_interval', 'sampling2_interval', 'dt', 'maxTime', 'N', 'l', 'boundary', 
-            'D', 'Drot', 'lambda_', 'agent_size', 'speed', 'target_size', 'source']
-        simdata = cls(**{i:simlog.parameter[i] for i in para})
+        simdata = cls(**simlog.parameter)
         simdata.phi0 = simlog.parameter['phi0']
         simdata.Linit = simlog.initL
         return simdata
 
     @classmethod
     def from_dict(cls, simdict,initL=None):
-        para = ['seed', 'sampling_interval', 'sampling2_interval', 'dt', 'maxTime', 'N', 'l', 'boundary', 
-            'D', 'Drot', 'lambda_', 'agent_size', 'speed', 'target_size', 'source']
-        simdata = cls(**{i:simdict[i] for i in para})
+        simdata = cls(**simdict)
         if initL is not None:
             simdata.phi0 = simdict.parameter['phi0']
             simdata.Linit = initL
@@ -124,6 +146,10 @@ class simdata():
 
     def _asdict(self):
         data={}
+        data['k'] = self.k
+        data['A'] = self.A
+        data['field'] = self.field
+        data['fieldReal'] = self.fieldReal
         data['seed'] = self.seed
         data['phi0'] = self.phi0
         data['maxTime'] = self.T
@@ -136,6 +162,11 @@ class simdata():
         data['DrotReal'] = self.DrotReal
         data['lambda_'] = self.lambda_
         data['lambdaReal_'] = self.lambdaReal_
+        if self.fieldReal == 'Asym':
+            data['gammaReal'] = self.gammaReal
+        if self.fieldReal == 'Drift':
+            data['D0'] = self.D0
+            data['vdrift'] = self.vdrift
         data['agent_size'] = self.agent_size
         data['agent_sizeReal'] = self.agent_sizeReal
         data['speed'] = self.speed
@@ -157,7 +188,10 @@ class simdata():
         return self.__repr__()
 
 
-
+    def calc_parameterExp(self,lam, r1, r2):
+        A = lam * r1**(-1 + r1/(r1 - r2)) * (1/r2)**(r1/(r1 - r2))
+        k = np.log(r1 / r2) / (r1 - r2)
+        return A, k
 
 
     def set_receptors(self,number=50):
@@ -181,25 +215,39 @@ class simdata():
         N = self.N
         space_discretization_step = self.space_discretization_step
         l = self.l
-        lambda_ = self.lambda_
-        bound = self.bound
         self.center = ((N-1)/2)*space_discretization_step
 
         self.R_x_ij = np.zeros((self.N,self.N))
-        functionsC.distances_ij(self.R_x_ij,self.center,self.space_discretization_step)
+        distances_ij(self.R_x_ij,self.center,self.space_discretization_step)
+        if self.field=='3Ddiff':
+            self.r_x_ij = np.zeros((self.N,self.N))
+            functions3dDiff.field_ij(self.r_x_ij,self.lambda_,self.center,self.space_discretization_step)
+            self.grad_r_x_ij = np.zeros((self.N,self.N,2))
+            functions3dDiff.grad_field_ij(self.grad_r_x_ij,self.lambda_,self.center,self.space_discretization_step)
 
-        self.r_x_ij = np.zeros((self.N,self.N))
-        functionsC.field_ij(self.r_x_ij,self.lambda_,self.center,self.space_discretization_step)
-        self.grad_r_x_ij = np.zeros((self.N,self.N,2))
-        functionsC.grad_field_ij(self.grad_r_x_ij,self.lambda_,self.center,self.space_discretization_step)
+            self.grad_Laplace_r_x_ij = np.zeros((self.N,self.N,2))
+            functions3dDiff.grad_laplace_field_ij(self.grad_Laplace_r_x_ij,self.lambda_,self.center,self.space_discretization_step)
 
-        self.grad_Laplace_r_x_ij = np.zeros((self.N,self.N,2))
-        functionsC.grad_laplace_field_ij(self.grad_Laplace_r_x_ij,self.lambda_,self.center,self.space_discretization_step)
+            H_ij = np.zeros((self.N,self.N,4))
+            self.Laplace_r_x_ij = np.zeros((self.N,self.N))
+            functions3dDiff.hess_field_ij(H_ij,self.Laplace_r_x_ij,self.lambda_,self.center,self.space_discretization_step)
+            self.H_r_x_ij = H_ij.reshape(self.N,self.N,2,2)
+        elif self.field=='Exp':
+            self.r_x_ij = np.zeros((self.N,self.N))
+            functionsExp.field_ij(self.r_x_ij,self.A,self.k,self.center,self.space_discretization_step)
+            self.grad_r_x_ij = np.zeros((self.N,self.N,2))
+            functionsExp.grad_field_ij(self.grad_r_x_ij,self.A,self.k,self.center,self.space_discretization_step)
 
-        H_ij = np.zeros((self.N,self.N,4))
-        self.Laplace_r_x_ij = np.zeros((self.N,self.N))
-        functionsC.hess_field_ij(H_ij,self.Laplace_r_x_ij,self.lambda_,self.center,self.space_discretization_step)
-        self.H_r_x_ij = H_ij.reshape(self.N,self.N,2,2)
+            self.grad_Laplace_r_x_ij = np.zeros((self.N,self.N,2))
+            functionsExp.grad_laplace_field_ij(self.grad_Laplace_r_x_ij,self.A,self.k,self.center,self.space_discretization_step)
+
+            H_ij = np.zeros((self.N,self.N,4))
+            self.Laplace_r_x_ij = np.zeros((self.N,self.N))
+            functionsExp.hess_field_ij(H_ij,self.Laplace_r_x_ij,self.A,self.k,self.center,self.space_discretization_step)
+            self.H_r_x_ij = H_ij.reshape(self.N,self.N,2,2)
+        else:
+            raise NotImplementedError
+
         # TODO: maybe we can combine certain fields into one (e.g., r_finite = total rate averaged over circumference)
         # TODO: maybe use linearized update equation by Ben [Eq. (3) in version from 08.10.2021]
 

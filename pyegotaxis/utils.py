@@ -44,6 +44,7 @@ def calc_t_snr(lambda_,speed,dx,dy,snr=1,bound=0):
     '''
     Calulate time for given SNR for temporal comperrison
     '''
+    raise NotImplementedError
     return ( \
                  (  functionsC.field(1,dx,dy,bound)  * snr  )  \
               /  ( lambda_*speed**2*(functionsC.grad_field(1,dx,dy,bound)**2).sum() )                                  \
@@ -53,6 +54,7 @@ def calc_snr(t,lambda_,speed,dx,dy,bound=0):
     '''
     Calulate SNR for temporal comperrison
     '''
+    raise NotImplementedError
     return ( \
                  (  lambda_*speed**2*t**3*(functionsC.grad_field(1,dx,dy,bound)**2).sum()  )  \
               /  (  functionsC.field(1, dx,dy,bound)  )                                  \
@@ -62,6 +64,7 @@ def calc_snr_sc(t,lambda_,agent_size,dx,dy,bound=0):
     '''
     Calulate SNR for spatial comperrison
     '''
+    raise NotImplementedError
     return ( \
                  (  lambda_*agent_size**2*t*(functionsC.grad_field(1,dx,dy,bound)**2).sum()  )  \
               /  (  functionsC.field(1,dx,dy,bound)  )                                  \

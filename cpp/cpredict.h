@@ -23,7 +23,8 @@ int predict_adv(int nrows, int ncols, double* likelihood,int nrows_r, int ncols_
 int predict_all(int nrows, int ncols, double* likelihood,int nrows_r, int ncols_r, double* res,
             double space_discretization_step, double dx, double dy , double D, double Drot, double cx,double cy, double dt  );
 
-
+int predict_rot(int nrows, int ncols, double* likelihood,int nrows_r, int ncols_r, double* res,
+            double space_discretization_step, double Drot, double cx,double cy, double dt  );
 
 
 
